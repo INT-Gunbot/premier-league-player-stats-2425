@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英超专业数据仪表盘</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { padding: 20px; font-family: system-ui, sans-serif; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); transition: 0.2s; }
+        .dark .card { background: #1f2937; color: #eee; }
+        .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 16px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+        .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { padding: 10px; background: #f7f8fa; cursor: pointer; user-select: none; font-weight: 600; }
+        .dark th { background: #374151; }
+        td { padding: 10px; border-bottom: 1px solid #f0f0f0; }
+        .dark td { border-color: #4b5563; }
+        tr:hover { background: #f7f8fa; }
+        .dark tr:hover { background: #374151; }
+        .chart-box { height: 340px; position: relative; }
+        canvas { width: 100% !important; height: 100% !important; }
+        .btn { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; background: #165DFF; color: white; }
+        .btn-outline { padding: 8px 12px; border-radius: 6px; border: 1px solid #ddd; cursor: pointer; background: white; }
+        .dark .btn-outline { background: #374151; color: #eee; border-color: #4b5563; }
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .dark .label { color: #ccc; }
+        .badge { padding: 3px 6px; border-radius: 4px; font-size: 12px; background: #eef2ff; color: #165DFF; }
+        .dark .badge { background: #374151; color: #bfdbfe; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+<div class="container">
+    <div class="text-center mb-6">
+        <h1 class="text-3xl font-bold text-blue-600">英超专业数据仪表盘</h1>
+        <p class="text-gray-500 mt-1">CSV导入 | 全筛选 | 6大图表 | 球员对比 | 球队雷达 | 导出Excel | 深色模式</p>
+    </div>
+
+    <!-- 导入区 -->
+    <div class="card">
+        <div class="flex flex-wrap items-center gap-4">
+            <div class="flex-1 min-w-[200px]">
+                
+                <input type="file" id="csvFile" accept=".csv" class="block w-full">
+            </div>
+            <button id="exportBtn" class="btn" disabled>导出 Excel</button>
+            <button id="themeBtn" class="btn-outline">深色模式</button>
+            <button id="resetBtn" class="btn-outline">重置筛选</button>
+        </div>
+        <div id="importTip" class="mt-2 text-gray-500 text-sm">请选择csv</div>
+    </div>
+
+    <!-- 筛选 -->
+    <div id="filterPanel" class="hidden card mt-4">
+        <div class="grid-3">
+            <div><div class="label">俱乐部</div><select id="club" class="w-full p-2 rounded border"></select></div>
+            <div><div class="label">位置</div><select id="pos" class="w-full p-2 rounded border"></select></div>
+            <div><div class="label">国籍</div><select id="nat" class="w-full p-2 rounded border"></select></div>
+            <div><div class="label">ML类型</div><select id="arch" class="w-full p-2 rounded border"></select></div>
+            <div><div class="label">最低出场分钟</div><input id="minMin" type="number" value="0" class="w-full p-2 rounded border"></div>
+            <div><div class="label">搜索球员</div><input id="search" type="text" class="w-full p-2 rounded border"></div>
+        </div>
+    </div>
+
+    <!-- 统计 -->
+    <div id="statPanel" class="hidden grid-3 mt-4">
+        <div class="card text-center"><p class="label">球员</p><p id="sPlayers" class="text-2xl font-bold">0</p></div>
+        <div class="card text-center"><p class="label">进球</p><p id="sGoals" class="text-2xl font-bold text-red-500">0</p></div>
+        <div class="card text-center"><p class="label">助攻</p><p id="sAssists" class="text-2xl font-bold text-green-500">0</p></div>
+        <div class="card text-center"><p class="label">场均效率(G+A/90)</p><p id="sP90" class="text-2xl font-bold text-blue-500">0.00</p></div>
+        <div class="card text-center"><p class="label">出场分钟</p><p id="sMins" class="text-2xl font-bold text-orange-500">0</p></div>
+        <div class="card text-center"><p class="label">射门转化率</p><p id="sRate" class="text-2xl font-bold text-purple-500">0.0%</p></div>
+    </div>
+
+    <!-- 排行榜 -->
+    <div id="rankPanel" class="hidden grid-3 mt-4">
+        <div class="card"><h3 class="mb-2 text-sm font-medium">射手榜 TOP5</h3><div id="topGoals" class="space-y-1"></div></div>
+        <div class="card"><h3 class="mb-2 text-sm font-medium">助攻榜 TOP5</h3><div id="topAssists" class="space-y-1"></div></div>
+        <div class="card"><h3 class="mb-2 text-sm font-medium">效率榜 TOP5</h3><div id="topP90" class="space-y-1"></div></div>
+    </div>
+
+    <!-- 图表 -->
+    <div id="chartPanel" class="hidden mt-4">
+        <div class="grid-2">
+            <div class="card chart-box"><h3 class="mb-2">俱乐部进球 TOP10</h3><canvas id="cClub"></canvas></div>
+            <div class="card chart-box"><h3 class="mb-2">球员位置分布</h3><canvas id="cPos"></canvas></div>
+            <div class="card chart-box"><h3 class="mb-2">进攻效率 TOP10</h3><canvas id="cP90"></canvas></div>
+            <div class="card chart-box"><h3 class="mb-2">防守贡献 TOP10</h3><canvas id="cDef"></canvas></div>
+            <div class="card chart-box"><h3 class="mb-2">进球 vs 助攻</h3><canvas id="cScatter"></canvas></div>
+            <div class="card chart-box"><h3 class="mb-2">出场时间 vs 效率</h3><canvas id="cMinP90"></canvas></div>
+        </div>
+    </div>
+
+    <!-- 球员对比 -->
+    <div id="vsPanel" class="hidden card mt-4">
+        <h3 class="mb-3 font-medium">球员双人对比</h3>
+        <div class="flex flex-wrap gap-4 mb-4">
+            <select id="p1" class="flex-1 min-w-[200px] p-2 border rounded"></select>
+            <select id="p2" class="flex-1 min-w-[200px] p-2 border rounded"></select>
+            <button id="vsBtn" class="btn">对比</button>
+        </div>
+        <div class="chart-box"><canvas id="cCompare"></canvas></div>
+    </div>
+
+    <!-- 表格 -->
+    <div id="tablePanel" class="hidden card mt-4">
+        <div class="flex justify-between mb-2">
+            <h3 class="font-medium">球员详细数据</h3>
+            <div class="text-sm text-gray-500">点击表头排序</div>
+        </div>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-sort="name">球员</th>
+                        <th>俱乐部</th>
+                        <th>位置</th>
+                        <th data-sort="archetype">ML类型</th>
+                        <th data-sort="goals">进球</th>
+                        <th data-sort="assists">助攻</th>
+                        <th data-sort="p90">每90分钟</th>
+                        <th data-sort="shots">射门</th>
+                        <th data-sort="rate">转化率</th>
+                        <th data-sort="xg_over">xG超额</th>
+                        <th data-sort="tackles">铲断</th>
+                        <th data-sort="clear">解围</th>
+                        <th data-sort="mins">出场分钟</th>
+                        <th data-sort="mvp">ML评分</th>
+                    </tr>
+                </thead>
+                <tbody id="tb"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="text-center text-gray-400 text-sm py-6">英超专业数据仪表盘</div>
+</div>
+
+<script>
+let dataset = [];
+let charts = {};
+let sortKey = "ml_score";
+let sortDir = -1;
+let dark = false;
+
+// 导入
+document.getElementById("csvFile").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    Papa.parse(file, {
+        header: true, skipEmptyLines: true, complete: res => {
+            dataset = res.data.map(i => ({
+                name: i["Player Name"] || "",
+                club: i["Club"] || "",
+                pos: i["Position"] || "",
+                nation: i["Nationality"] || "",
+                archetype: i["Archetype"] || "",
+                goals: +i["Goals"] || 0,
+                assists: +i["Assists"] || 0,
+                shots: +i["Shots"] || 0,
+                tackles: +i["Tackles"] || 0,
+                clear: +i["Clearances"] || 0,
+                mins: +i["Minutes"] || 0,
+                xg_over: +i["xG_Overperformance"] || 0,
+                ml_score: +i["ML_Score"] || 0
+            })).filter(x => x.name);
+
+            document.getElementById("filterPanel").classList.remove("hidden");
+            document.getElementById("statPanel").classList.remove("hidden");
+            document.getElementById("rankPanel").classList.remove("hidden");
+            document.getElementById("chartPanel").classList.remove("hidden");
+            document.getElementById("vsPanel").classList.remove("hidden");
+            document.getElementById("tablePanel").classList.remove("hidden");
+            document.getElementById("exportBtn").disabled = false;
+            document.getElementById("importTip").textContent = `已加载 ${dataset.length} 名球员`;
+            init();
+            refresh();
+        }
+    });
+});
+
+// 初始化
+function init() {
+    const clubs = [...new Set(dataset.map(x => x.club))].sort();
+    const nations = [...new Set(dataset.map(x => x.nation))].sort();
+    const pos = ["all", "FWD", "MID", "DEF", "GKP"];
+    const players = [...new Set(dataset.map(x => x.name))].sort();
+
+    function fillSel(id, arr) {
+        const sel = document.getElementById(id);
+        sel.innerHTML = `<option value="all">全部</option>`;
+        arr.forEach(x => x !== "all" && (sel.innerHTML += `<option value="${x}">${x}</option>`));
+    }
+    fillSel("club", clubs);
+    fillSel("nat", nations);
+    fillSel("pos", pos);
+    const archs = [...new Set(dataset.map(x => x.archetype).filter(Boolean))].sort();
+    fillSel("arch", archs);
+    fillSel("p1", players);
+    fillSel("p2", players);
+
+    document.querySelectorAll("#club,#pos,#nat,#arch,#minMin,#search").forEach(i => {
+        i.addEventListener("input", refresh);
+    });
+    document.querySelectorAll("th[data-sort]").forEach(th => {
+        th.addEventListener("click", () => {
+            sortKey = th.dataset.sort;
+            sortDir = (sortKey === th.dataset.sort) ? -sortDir : -1;
+            refresh();
+        });
+    });
+    document.getElementById("vsBtn").addEventListener("click", compare);
+    document.getElementById("resetBtn").addEventListener("click", () => {
+        document.getElementById("club").value = "all";
+        document.getElementById("pos").value = "all";
+        document.getElementById("nat").value = "all";
+        document.getElementById("arch").value = "all";
+        document.getElementById("minMin").value = 0;
+        document.getElementById("search").value = "";
+        refresh();
+    });
+    document.getElementById("themeBtn").addEventListener("click", () => {
+        dark = !dark;
+        document.body.classList.toggle("dark");
+        document.body.style.background = dark ? "#111827" : "#f9fafb";
+        refresh();
+    });
+}
+
+// 筛选数据
+function getList() {
+    const club = document.getElementById("club").value;
+    const pos = document.getElementById("pos").value;
+    const nat = document.getElementById("nat").value;
+    const arch = document.getElementById("arch").value;
+    const min = +document.getElementById("minMin").value || 0;
+    const kw = document.getElementById("search").value.toLowerCase();
+    return dataset.filter(x => {
+        return (club === "all" || x.club === club) &&
+               (pos === "all" || x.pos === pos) &&
+               (nat === "all" || x.nation === nat) &&
+               (arch === "all" || (x.archetype||"") === arch) &&
+               x.mins >= min && x.name.toLowerCase().includes(kw);
+    });
+}
+
+// 刷新
+function refresh() {
+    const data = getList();
+    updateStats(data);
+    updateRanks(data);
+    renderTable(data);
+    renderCharts(data);
+}
+
+// 统计
+function updateStats(data) {
+    const cnt = data.length;
+    const g = data.reduce((s, i) => s + i.goals, 0);
+    const a = data.reduce((s, i) => s + i.assists, 0);
+    const m = data.reduce((s, i) => s + i.mins, 0);
+    const sh = data.reduce((s, i) => s + i.shots, 0);
+    const p90 = cnt ? (((g + a) / m * 90) || 0).toFixed(2) : 0;
+    const rate = sh ? ((g / sh * 100) || 0).toFixed(1) : 0;
+
+    document.getElementById("sPlayers").textContent = cnt;
+    document.getElementById("sGoals").textContent = g;
+    document.getElementById("sAssists").textContent = a;
+    document.getElementById("sP90").textContent = p90;
+    document.getElementById("sMins").textContent = m;
+    document.getElementById("sRate").textContent = rate + "%";
+}
+
+// 排行榜
+function updateRanks(data) {
+    function top(list, key, n) {
+        return [...list].sort((a,b)=>b[key]-a[key]).slice(0,n);
+    }
+    function show(el, list, key) {
+        const html = list.map(i => `<div class="flex justify-between"><span>${i.name}</span><span class="font-bold">${i[key]}</span></div>`).join("");
+        document.getElementById(el).innerHTML = html;
+    }
+    show("topGoals", top(data,"goals",5), "goals");
+    show("topAssists", top(data,"assists",5), "assists");
+    const p90list = [...data].map(i=>({...i,p90:i.mins?((i.goals+i.assists)/i.mins*90).toFixed(2):0})).sort((a,b)=>b.p90-a.p90).slice(0,5);
+    document.getElementById("topP90").innerHTML = p90list.map(i=>`<div class="flex justify-between"><span>${i.name}</span><span class="font-bold">${i.p90}</span></div>`).join("");
+}
+
+// 表格
+function renderTable(data) {
+    const tb = document.getElementById("tb");
+    tb.innerHTML = "";
+    const sorted = [...data].sort((x,y)=>{
+        if(sortKey==="name") return x.name.localeCompare(y.name)*sortDir;
+        if(sortKey==="archetype") return (x.archetype||"").localeCompare(y.archetype||"")*sortDir;
+        if(sortKey==="p90") return (((y.goals+y.assists)/y.mins*90) - ((x.goals+x.assists)/x.mins*90))*sortDir;
+        if(sortKey==="rate") return (y.goals/y.shots - x.goals/x.shots)*sortDir;
+        if(sortKey==="mvp"||sortKey==="ml_score") return ((y.ml_score||0) - (x.ml_score||0))*sortDir;
+        if(sortKey==="xg_over") return ((y.xg_over||0) - (x.xg_over||0))*sortDir;
+        return (x[sortKey]-y[sortKey])*sortDir;
+    });
+    sorted.forEach(i=>{
+        const p90 = i.mins ? ((i.goals+i.assists)/i.mins*90).toFixed(2) : 0;
+        const rate = i.shots ? ((i.goals/i.shots*100)).toFixed(1) : 0;
+        const mlScore = i.ml_score ? Math.round(i.ml_score) : Math.round(mvp(i));
+        const xgOver = i.xg_over ? i.xg_over.toFixed(1) : '-';
+        const archetype = i.archetype || '-';
+        const archColor = (name => {
+            const map = {
+                'Finisher': '#dc2626', 'Playmaker': '#2563eb', 'Ball-Winner': '#ea580c',
+                'Ball-Carrier': '#7c3aed', 'Deep-Lying Playmaker': '#0891b2',
+                'Goalkeeper': '#d97706', 'Clinical Finisher': '#b91c1c',
+                'Chance-Creator': '#db2777', 'Pass-Master': '#0284c7',
+                'Sharpshooter': '#be185d', 'Aerial Threat': '#d97706',
+                'Defensive Wall': '#f97316',
+                'Balanced-0': '#059669', 'Balanced-1': '#0d9488',
+                'Balanced-2': '#6366f1', 'Balanced-3': '#8b5cf6', 'Balanced-4': '#a21caf',
+                'Balanced-5': '#be185d', 'Balanced-6': '#e11d48'
+            };
+            return map[name] || '#6b7280';
+        })(archetype);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${i.name}</td>
+            <td>${i.club}</td>
+            <td><span class="badge">${i.pos}</span></td>
+            <td><span class="badge" style="background:${archColor};color:#fff">${archetype}</span></td>
+            <td class="text-right font-bold text-red-500">${i.goals}</td>
+            <td class="text-right font-bold text-green-500">${i.assists}</td>
+            <td class="text-right font-bold text-blue-500">${p90}</td>
+            <td class="text-right">${i.shots}</td>
+            <td class="text-right">${rate}%</td>
+            <td class="text-right font-bold" style="color:${xgOver>=0?'#16a34a':'#dc2626'}">${xgOver}</td>
+            <td class="text-right">${i.tackles}</td>
+            <td class="text-right">${i.clear}</td>
+            <td class="text-right">${i.mins}</td>
+            <td class="text-right font-bold text-purple-500">${mlScore}</td>`;
+        tb.appendChild(tr);
+    });
+}
+
+// MVP评分算法
+function mvp(p) {
+    const g = p.goals * 8;
+    const a = p.assists * 6;
+    const sh = p.shots * 0.5;
+    const tk = p.tackles * 1.2;
+    const cl = p.clear * 0.8;
+    const min = Math.sqrt(p.mins) * 0.5;
+    return g + a + sh + tk + cl + min;
+}
+
+// 图表
+function renderCharts(data) {
+    Object.values(charts).forEach(c=>c.destroy());
+    const color = dark ? "#eee" : "#111";
+
+    // 俱乐部
+    const clubMap = {}; data.forEach(i=>clubMap[i.club]=(clubMap[i.club]||0)+i.goals);
+    const clubTop = Object.entries(clubMap).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    charts.club = new Chart(document.getElementById("cClub"),{
+        type:"bar",data:{labels:clubTop.map(x=>x[0]),datasets:[{data:clubTop.map(x=>x[1]),backgroundColor:"#165DFF"}]},
+        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color}}}}
+    });
+
+    // 位置
+    const posCnt={FWD:0,MID:0,DEF:0,GKP:0}; data.forEach(i=>posCnt[i.pos]++);
+    charts.pos = new Chart(document.getElementById("cPos"),{
+        type:"doughnut",data:{
+            labels:["前锋","中场","后卫","门将"],
+            datasets:[{data:[posCnt.FWD,posCnt.MID,posCnt.DEF,posCnt.GKP],backgroundColor:["#ef4444","#165DFF","#22c55e","#f97316"]}]
+        },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color}}}}
+    });
+
+    // 效率
+    const p90List = [...data].map(i=>({...i,p90:i.mins?((i.goals+i.assists)/i.mins*90):0})).sort((a,b)=>b.p90-a.p90).slice(0,10);
+    charts.p90 = new Chart(document.getElementById("cP90"),{
+        type:"bar",data:{labels:p90List.map(x=>x.name),datasets:[{data:p90List.map(x=>x.p90.toFixed(2)),backgroundColor:"#22c55e"}]},
+        options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",plugins:{legend:{labels:{color}}}}
+    });
+
+    // 防守
+    const defList = [...data].map(i=>({...i,def:i.tackles+i.clear})).sort((a,b)=>b.def-a.def).slice(0,10);
+    charts.def = new Chart(document.getElementById("cDef"),{
+        type:"bar",data:{labels:defList.map(x=>x.name),datasets:[{data:defList.map(x=>x.def),backgroundColor:"#f97316"}]},
+        options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",plugins:{legend:{labels:{color}}}}
+    });
+
+    // 散点
+    charts.scatter = new Chart(document.getElementById("cScatter"),{
+        type:"scatter",data:{
+            datasets:[{label:"进球vs助攻",data:data.map(i=>({x:i.goals,y:i.assists})),backgroundColor:"#165DFF",pointRadius:5}]
+        },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color}}}}
+    });
+
+    // 时间vs效率
+    charts.minp90 = new Chart(document.getElementById("cMinP90"),{
+        type:"scatter",data:{
+            datasets:[{label:"时间vs效率",data:data.map(i=>({x:i.mins,y:i.mins?((i.goals+i.assists)/i.mins*90).toFixed(2):0})),backgroundColor:"#a855f7",pointRadius:5}]
+        },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color}}}}
+    });
+}
+
+// 球员对比
+function compare() {
+    const n1 = document.getElementById("p1").value;
+    const n2 = document.getElementById("p2").value;
+    const p1 = dataset.find(x=>x.name===n1);
+    const p2 = dataset.find(x=>x.name===n2);
+    if(!p1||!p2) return;
+
+    function score(p) {
+        const g = p.goals / 5;
+        const a = p.assists / 4;
+        const sh = p.shots / 20;
+        const tk = p.tackles / 10;
+        const cl = p.clear / 15;
+        const m = Math.sqrt(p.mins)/10;
+        return [g,a,sh,tk,cl,m].map(v=>Math.min(v,5));
+    }
+    if(charts.compare) charts.compare.destroy();
+    charts.compare = new Chart(document.getElementById("cCompare"),{
+        type:"radar",data:{
+            labels:["进球","助攻","射门","铲断","解围","体能"],
+            datasets:[
+                {label:p1.name,data:score(p1),backgroundColor:"rgba(22,122,255,0.2)",borderColor:"#165DFF"},
+                {label:p2.name,data:score(p2),backgroundColor:"rgba(239,68,68,0.2)",borderColor:"#ef4444"}
+            ]
+        },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:dark?"#eee":"#111"}}}}
+    });
+}
+
+// 导出
+document.getElementById("exportBtn").addEventListener("click",()=>{
+    const out = getList().map(i=>({
+        球员:i.name,俱乐部:i.club,位置:i.pos,ML类型:i.archetype||"",进球:i.goals,助攻:i.assists,射门:i.shots,xG超额:i.xg_over!=null?i.xg_over.toFixed(1):"",铲断:i.tackles,解围:i.clear,出场分钟:i.mins,ML评分:i.ml_score?Math.round(i.ml_score):Math.round(mvp(i))
+    }));
+    XLSX.writeFile(XLSX.utils.book_new(XLSX.utils.json_to_sheet(out),"数据"),"英超球员数据.xlsx");
+});
+</script>
+</body>
+</html>
